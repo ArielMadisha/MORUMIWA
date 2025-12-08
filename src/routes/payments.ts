@@ -1,6 +1,5 @@
 // src/routes/payments.ts
 import express from "express";
-import Payment from "../data/models/Payment";
 import { authenticate, authorize } from "../middleware/auth";
 import { initiatePayment, verifyPayment } from "../services/payment";
 
@@ -8,48 +7,63 @@ const router = express.Router();
 
 /**
  * POST /api/payments/initiate
- * Client initiates payment for a task
+ * Initiate a payment request
  */
-router.post("/initiate", authenticate, authorize(["client"]), async (req, res) => {
+router.post("/initiate", authenticate, async (req, res) => {
   try {
-    const { taskId, amount } = req.body;
-    const reference = `TASK-${taskId}-${Date.now()}`;
-    const returnUrl = `${process.env.BASE_URL}/api/payments/verify`;
+    const { amount, reference, returnUrl } = req.body;
 
-    const payload = await initiatePayment(amount, reference, returnUrl);
+    if (!amount || !reference || !returnUrl) {
+      return res.status(400).json({ error: "amount, reference, and returnUrl are required" });
+    }
 
-    const payment = new Payment({
-      task: taskId,
-      client: req.user?.id,
-      amount,
-      status: "pending",
+    const paymentRequest = await initiatePayment(amount, reference, returnUrl);
+
+    res.status(201).json({
+      success: true,
+      paymentRequest,
     });
-    await payment.save();
-
-    res.json({ payment, payload });
-  } catch (err) {
-    res.status(500).json({ error: "Payment initiation failed" });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Failed to initiate payment" });
   }
 });
 
 /**
  * POST /api/payments/verify
- * PayGate callback to verify payment
+ * Verify a payment request
  */
-router.post("/verify", async (req, res) => {
+router.post("/verify", authenticate, async (req, res) => {
   try {
-    const { PAY_REQUEST_ID, CHECKSUM } = req.body;
-    const result = await verifyPayment(PAY_REQUEST_ID, CHECKSUM);
+    const { payRequestId, checksum } = req.body;
 
-    const payment = await Payment.findOne({ transactionId: PAY_REQUEST_ID });
-    if (payment) {
-      payment.status = result.status;
-      await payment.save();
+    if (!payRequestId || !checksum) {
+      return res.status(400).json({ error: "payRequestId and checksum are required" });
     }
 
-    res.json({ status: result.status });
-  } catch (err) {
-    res.status(500).json({ error: "Payment verification failed" });
+    const verification = await verifyPayment(payRequestId, checksum);
+
+    res.json({
+      success: verification.success,
+      verification,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Failed to verify payment" });
+  }
+});
+
+/**
+ * GET /api/payments/admin/logs
+ * Admin-only: View payment logs (future extension)
+ */
+router.get("/admin/logs", authenticate, authorize(["admin", "superadmin"]), async (req, res) => {
+  try {
+    // In production, you’d query your Transaction model here
+    res.json({
+      success: true,
+      message: "Payment logs endpoint scaffolded",
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: "Failed to fetch payment logs" });
   }
 });
 

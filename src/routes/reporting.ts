@@ -13,9 +13,14 @@ const router = express.Router();
  * GET /api/reporting/users/csv
  * Export all users as CSV
  */
-router.get("/users/csv", authenticate, authorize(["admin"]), async (req, res) => {
+router.get("/users/csv", authenticate, authorize(["admin", "superadmin"]), async (req, res) => {
   try {
     const users = await User.find().select("-passwordHash");
+
+    if (!users.length) {
+      return res.status(404).json({ success: false, error: "No users found" });
+    }
+
     const parser = new Parser({ fields: ["name", "email", "role", "createdAt"] });
     const csv = parser.parse(users);
 
@@ -23,7 +28,7 @@ router.get("/users/csv", authenticate, authorize(["admin"]), async (req, res) =>
     res.attachment("users_report.csv");
     return res.send(csv);
   } catch (err) {
-    res.status(500).json({ error: "Failed to generate CSV report" });
+    res.status(500).json({ success: false, error: "Failed to generate CSV report" });
   }
 });
 
@@ -31,9 +36,13 @@ router.get("/users/csv", authenticate, authorize(["admin"]), async (req, res) =>
  * GET /api/reporting/tasks/pdf
  * Export tasks summary as PDF
  */
-router.get("/tasks/pdf", authenticate, authorize(["admin"]), async (req, res) => {
+router.get("/tasks/pdf", authenticate, authorize(["admin", "superadmin"]), async (req, res) => {
   try {
     const tasks = await Task.find().populate("client runner", "name role");
+
+    if (!tasks.length) {
+      return res.status(404).json({ success: false, error: "No tasks found" });
+    }
 
     const doc = new PDFDocument();
     res.setHeader("Content-Type", "application/pdf");
@@ -45,14 +54,19 @@ router.get("/tasks/pdf", authenticate, authorize(["admin"]), async (req, res) =>
 
     tasks.forEach((task) => {
       doc.fontSize(12).text(
-        `Title: ${task.title}\nClient: ${task.client?.name}\nRunner: ${task.runner?.name || "N/A"}\nStatus: ${task.status}\nBudget: R${task.budget}\n---`
+        `Title: ${task.title}
+Client: ${task.client?.name}
+Runner: ${task.runner?.name || "N/A"}
+Status: ${task.status}
+Budget: R${task.budget}
+---`
       );
       doc.moveDown();
     });
 
     doc.end();
   } catch (err) {
-    res.status(500).json({ error: "Failed to generate PDF report" });
+    res.status(500).json({ success: false, error: "Failed to generate PDF report" });
   }
 });
 
@@ -60,18 +74,29 @@ router.get("/tasks/pdf", authenticate, authorize(["admin"]), async (req, res) =>
  * GET /api/reporting/revenue/csv
  * Export revenue data as CSV
  */
-router.get("/revenue/csv", authenticate, authorize(["admin"]), async (req, res) => {
+router.get("/revenue/csv", authenticate, authorize(["admin", "superadmin"]), async (req, res) => {
   try {
-    const payments = await Payment.find({ status: "successful" });
-    const parser = new Parser({ fields: ["task", "client", "runner", "amount", "createdAt"] });
+    const payments = await Payment.find({ status: "successful" })
+      .populate("task", "title")
+      .populate("client", "name")
+      .populate("runner", "name");
+
+    if (!payments.length) {
+      return res.status(404).json({ success: false, error: "No revenue records found" });
+    }
+
+    const parser = new Parser({
+      fields: ["task.title", "client.name", "runner.name", "amount", "createdAt"],
+    });
     const csv = parser.parse(payments);
 
     res.header("Content-Type", "text/csv");
     res.attachment("revenue_report.csv");
     return res.send(csv);
   } catch (err) {
-    res.status(500).json({ error: "Failed to generate revenue CSV report" });
+    res.status(500).json({ success: false, error: "Failed to generate revenue CSV report" });
   }
 });
 
 export default router;
+

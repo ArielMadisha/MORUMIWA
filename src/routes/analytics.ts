@@ -12,7 +12,7 @@ const router = express.Router();
  * GET /api/analytics/overview
  * Platform overview stats
  */
-router.get("/overview", authenticate, authorize(["admin"]), async (req, res) => {
+router.get("/overview", authenticate, authorize(["admin", "superadmin"]), async (req, res) => {
   try {
     const totalUsers = await User.countDocuments();
     const totalTasks = await Task.countDocuments();
@@ -23,13 +23,16 @@ router.get("/overview", authenticate, authorize(["admin"]), async (req, res) => 
     ]);
 
     res.json({
-      totalUsers,
-      totalTasks,
-      completedTasks,
-      totalRevenue: totalRevenue[0]?.sum || 0,
+      success: true,
+      users: totalUsers,
+      tasks: {
+        total: totalTasks,
+        completed: completedTasks,
+      },
+      revenue: totalRevenue[0]?.sum || 0,
     });
   } catch (err) {
-    res.status(500).json({ error: "Failed to fetch analytics" });
+    res.status(500).json({ error: "Failed to fetch analytics overview" });
   }
 });
 
@@ -37,18 +40,23 @@ router.get("/overview", authenticate, authorize(["admin"]), async (req, res) => 
  * GET /api/analytics/tasks/weekly
  * Tasks created per week
  */
-router.get("/tasks/weekly", authenticate, authorize(["admin"]), async (req, res) => {
+router.get("/tasks/weekly", authenticate, authorize(["admin", "superadmin"]), async (req, res) => {
   try {
     const weeklyTasks = await Task.aggregate([
       {
         $group: {
-          _id: { $isoWeek: "$createdAt" },
+          _id: { week: { $isoWeek: "$createdAt" }, year: { $isoWeekYear: "$createdAt" } },
           count: { $sum: 1 },
         },
       },
-      { $sort: { _id: 1 } },
+      { $sort: { "_id.year": 1, "_id.week": 1 } },
     ]);
-    res.json(weeklyTasks);
+
+    res.json({
+      success: true,
+      count: weeklyTasks.length,
+      weeklyTasks,
+    });
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch weekly tasks" });
   }
@@ -58,19 +66,24 @@ router.get("/tasks/weekly", authenticate, authorize(["admin"]), async (req, res)
  * GET /api/analytics/revenue/monthly
  * Revenue growth per month
  */
-router.get("/revenue/monthly", authenticate, authorize(["admin"]), async (req, res) => {
+router.get("/revenue/monthly", authenticate, authorize(["admin", "superadmin"]), async (req, res) => {
   try {
     const monthlyRevenue = await Payment.aggregate([
       { $match: { status: "successful" } },
       {
         $group: {
-          _id: { $month: "$createdAt" },
+          _id: { month: { $month: "$createdAt" }, year: { $year: "$createdAt" } },
           total: { $sum: "$amount" },
         },
       },
-      { $sort: { _id: 1 } },
+      { $sort: { "_id.year": 1, "_id.month": 1 } },
     ]);
-    res.json(monthlyRevenue);
+
+    res.json({
+      success: true,
+      count: monthlyRevenue.length,
+      monthlyRevenue,
+    });
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch monthly revenue" });
   }
@@ -80,7 +93,7 @@ router.get("/revenue/monthly", authenticate, authorize(["admin"]), async (req, r
  * GET /api/analytics/runners/performance
  * Runner performance stats (average rating, completed tasks)
  */
-router.get("/runners/performance", authenticate, authorize(["admin"]), async (req, res) => {
+router.get("/runners/performance", authenticate, authorize(["admin", "superadmin"]), async (req, res) => {
   try {
     const runners = await User.find({ role: "runner" });
     const performance = await Promise.all(
@@ -91,10 +104,20 @@ router.get("/runners/performance", authenticate, authorize(["admin"]), async (re
           reviews.length > 0
             ? reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length
             : 0;
-        return { runner: runner.name, completedTasks, avgRating };
+        return {
+          runnerId: runner._id,
+          runnerName: runner.name,
+          completedTasks,
+          avgRating: Number(avgRating.toFixed(2)),
+        };
       })
     );
-    res.json(performance);
+
+    res.json({
+      success: true,
+      count: performance.length,
+      performance,
+    });
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch runner performance" });
   }
@@ -104,7 +127,7 @@ router.get("/runners/performance", authenticate, authorize(["admin"]), async (re
  * GET /api/analytics/tasks/daily
  * Daily tasks trend (last 7 days)
  */
-router.get("/tasks/daily", authenticate, authorize(["admin"]), async (req, res) => {
+router.get("/tasks/daily", authenticate, authorize(["admin", "superadmin"]), async (req, res) => {
   try {
     const dailyTasks = await Task.aggregate([
       {
@@ -116,7 +139,12 @@ router.get("/tasks/daily", authenticate, authorize(["admin"]), async (req, res) 
       { $sort: { _id: -1 } },
       { $limit: 7 },
     ]);
-    res.json(dailyTasks);
+
+    res.json({
+      success: true,
+      count: dailyTasks.length,
+      dailyTasks: dailyTasks.reverse(),
+    });
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch daily tasks" });
   }
@@ -126,20 +154,25 @@ router.get("/tasks/daily", authenticate, authorize(["admin"]), async (req, res) 
  * GET /api/analytics/revenue/weekly
  * Weekly revenue growth
  */
-router.get("/revenue/weekly", authenticate, authorize(["admin"]), async (req, res) => {
+router.get("/revenue/weekly", authenticate, authorize(["admin", "superadmin"]), async (req, res) => {
   try {
     const weeklyRevenue = await Payment.aggregate([
       { $match: { status: "successful" } },
       {
         $group: {
-          _id: { $isoWeek: "$createdAt" },
+          _id: { week: { $isoWeek: "$createdAt" }, year: { $isoWeekYear: "$createdAt" } },
           total: { $sum: "$amount" },
         },
       },
-      { $sort: { _id: -1 } },
+      { $sort: { "_id.year": -1, "_id.week": -1 } },
       { $limit: 6 },
     ]);
-    res.json(weeklyRevenue);
+
+    res.json({
+      success: true,
+      count: weeklyRevenue.length,
+      weeklyRevenue: weeklyRevenue.reverse(),
+    });
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch weekly revenue" });
   }
@@ -149,7 +182,7 @@ router.get("/revenue/weekly", authenticate, authorize(["admin"]), async (req, re
  * GET /api/analytics/users/activity
  * Active users in last 30 days
  */
-router.get("/users/activity", authenticate, authorize(["admin"]), async (req, res) => {
+router.get("/users/activity", authenticate, authorize(["admin", "superadmin"]), async (req, res) => {
   try {
     const activeClients = await Task.distinct("client", {
       createdAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
@@ -159,6 +192,7 @@ router.get("/users/activity", authenticate, authorize(["admin"]), async (req, re
     });
 
     res.json({
+      success: true,
       activeClients: activeClients.length,
       activeRunners: activeRunners.length,
     });
